@@ -1,0 +1,6 @@
+# Secrets and credentials — NEVER commit
+srcs/.env
+secrets/*.txt
+
+# Miscellaneous
+*.log
