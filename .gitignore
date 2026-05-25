@@ -1,6 +1,6 @@
-# Secrets and credentials — NEVER commit
-srcs/.env
 secrets/*.txt
 
-# Miscellaneous
+*.local.env
+local.env
+
 *.log
