@@ -1,6 +1,7 @@
+name: inception
 services:
   mariadb:
-    image: mariadb
+    image: mariadb:inception
     container_name: mariadb
     build:
       context: ./requirements/mariadb
@@ -17,7 +18,7 @@ services:
     restart: always
 
   wordpress:
-    image: wordpress
+    image: wordpress:inception
     container_name: wordpress
     build:
       context: ./requirements/wordpress
@@ -37,7 +38,7 @@ services:
     restart: always
 
   nginx:
-    image: nginx
+    image: nginx:inception
     container_name: nginx
     build:
       context: ./requirements/nginx
