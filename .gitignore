@@ -1,6 +1,3 @@
-secrets/*.txt
-
-*.local.env
-local.env
-
+secrets/*
+*local.env
 *.log

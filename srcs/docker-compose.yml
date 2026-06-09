@@ -25,6 +25,7 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
+      - local.env
     secrets:
       - db_password
       - wp_admin_password
