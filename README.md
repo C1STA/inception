@@ -4,46 +4,48 @@
 
 ## Description
 
-Inception is a system administration project based on Docker.
+Inception is a 42 system administration project. It builds a small Docker infrastructure inside a Debian virtual machine.
 
-The goal of the project is to build a small containerized infrastructure inside a virtual machine using Docker Compose.
+The mandatory stack contains:
 
-The mandatory stack contains three services:
-
-- **NGINX**: the only public entrypoint, exposed on port 443 with TLSv1.2/TLSv1.3.
-- **WordPress + php-fpm**: the application service, running without NGINX.
-- **MariaDB**: the database service, running without NGINX.
+- **NGINX**: HTTPS entrypoint on port `443`.
+- **WordPress + php-fpm**: application service.
+- **MariaDB**: database service.
 
 The website is available at:
 
-~~~text
-https://wacista.42.fr
-~~~
-
-HTTP access on port 80 is intentionally not exposed.
-
-## Project Description
-
-The infrastructure is built with one Dockerfile per service.
-
-Each image is built locally from Debian and is not pulled from ready-made service images.
-
-The services communicate through a dedicated Docker network:
-
 ```text
-NGINX -> WordPress/php-fpm -> MariaDB
+https://wacista.42.fr
 ```
 
-Persistent data is stored using Docker named volumes:
+HTTP on port `80` is not exposed.
 
-~~text
+## Project description
+
+Architecture:
+
+```text
+Browser -> HTTPS 443 -> NGINX -> wordpress:9000 -> WordPress/php-fpm -> mariadb:3306 -> MariaDB
+```
+
+Each service has its own Dockerfile and local image:
+
+```text
+nginx:inception
+wordpress:inception
+mariadb:inception
+```
+
+Persistent data is stored in Docker named volumes:
+
+```text
 mariadb_data   -> /home/wacista/data/mariadb
 wordpress_data -> /home/wacista/data/wordpress
-~~
+```
 
-Sensitive values such as database and WordPress passwords are stored in Docker secrets and are not committed to the Git repository.
+The services communicate through the Docker network `inception`. Only NGINX publishes a port to the host.
 
-## Design Choices
+## Docker concepts
 
 ### Virtual Machines vs Docker
 
@@ -55,311 +57,94 @@ In this project, the whole infrastructure runs inside a virtual machine, while e
 
 ### Secrets vs Environment Variables
 
-Environment variables are useful for non-sensitive configuration, such as:
-
-~~text
-DOMAIN_NAME
-MYSQL_DATABASE
-MYSQL_USER
-WP_TITLE
-WP_ADMIN_USER
-WP_USER
-~~
-
-Secrets are used for sensitive values, such as:
-
-~~text
-database root password
-database user password
-WordPress administrator password
-WordPress regular user password
-~~
-
-This avoids storing passwords directly inside Dockerfiles, scripts, or the `.env` file.
+Environment variables define how the services are configured; Docker secrets store sensitive values such as passwords outside of the Git repository.
 
 ### Docker Network vs Host Network
 
-A Docker network isolates the containers from the host network while allowing containers to communicate with each other by service name.
+A Docker network gives containers their own isolated network and lets them communicate by service name.
 
-For example:
+Host networking would make a container use the host network directly, reducing isolation and making port exposure less explicit.
 
-~~text
-wordpress can reach mariadb using the hostname "mariadb"
-nginx can reach wordpress using the hostname "wordpress"
-~~
-
-Host network mode is not used because it removes this isolation and is forbidden in this project.
+This project uses a Docker network, so only NGINX publishes port `443` to the host.
 
 ### Docker Volumes vs Bind Mounts
 
-A Docker named volume is managed by Docker and can persist data even if containers are removed.
+Containers are temporary, so persistent data must be stored outside the container writable layer.
 
-In this project, named volumes are used for:
+Docker volumes are managed by Docker and are designed to persist data beyond a container’s lifetime.
 
-~~text
-MariaDB database files
-WordPress website files
-~~
+Bind mounts directly map a specific host directory into a container.
 
-The volumes are configured to store their data under `/home/wacista/data` on the host machine, as required by the project.
-
-Bind mounts directly map a host path into a container. They are useful in some development workflows, but for this project the required persistent storages are Docker named volumes.
-
-## Directory Structure
-
-~~text
-inception/
-├── Makefile
-├── README.md
-├── USER_DOC.md
-├── DEV_DOC.md
-├── .gitignore
-├── secrets/
-│   ├── db_password.txt
-│   ├── db_root_password.txt
-│   ├── wp_admin_password.txt
-│   └── wp_user_password.txt
-└── srcs/
-    ├── .env
-    ├── docker-compose.yml
-    └── requirements/
-        ├── mariadb/
-        │   ├── conf/
-        │   │   └── 50-server.cnf
-        │   ├── Dockerfile
-        │   └── tools/
-        │       └── init.sh
-        ├── nginx/
-        │   ├── conf/
-        │   │   └── nginx.conf
-        │   ├── Dockerfile
-        │   └── tools/
-        │       └── init.sh
-        └── wordpress/
-            ├── conf/
-            │   └── www.conf
-            ├── Dockerfile
-            └── tools/
-                └── init.sh
-~~
-
-The secret files are generated locally and must not be committed to Git.
+In this project, named volumes are used for MariaDB and WordPress data, and they are configured to store their files under `/home/wacista/data`.
 
 ## Instructions
 
-### Prerequisites
+From the project root:
 
-This project is designed to run inside a Debian virtual machine with Docker installed.
-
-Required tools:
-
-~~text
-docker
-docker compose
+```bash
 make
-openssl
-~~
+```
 
-### Configure the domain
+This creates the data directories, generates missing password secrets, builds the images and starts the containers.
 
-The domain must point to the IP address of the machine running the project.
+Useful commands:
 
-Inside the virtual machine, a local setup can use this line in `/etc/hosts`:
+```bash
+make down      # stop containers
+make ps        # show services
+make logs      # show logs
+make fclean    # full cleanup, including /home/wacista/data
+make re        # full rebuild
+```
 
-~~text
-127.0.0.1 wacista.42.fr
-~~
+## Useful checks
 
-From another host machine, such as a Windows host running VirtualBox, `wacista.42.fr` must point to the virtual machine IP address.
+Check HTTPS:
 
-Example:
-
-~~text
-192.168.x.x wacista.42.fr
-~~
-
-### Build and start
-
-From the repository root:
-
-~~bash
-make
-~~
-
-This command:
-
-1. creates the required data directories;
-2. creates missing secret files;
-3. builds the Docker images;
-4. starts the containers with Docker Compose.
-
-### Stop the stack
-
-~~bash
-make down
-~~
-
-### View containers
-
-~~bash
-make ps
-~~
-
-### View logs
-
-~~bash
-make logs
-~~
-
-### Clean Docker objects
-
-~~bash
-make clean
-~~
-
-### Full cleanup
-
-~~bash
-make fclean
-~~
-
-This removes containers, Docker volumes, unused Docker objects, and the persistent data directory:
-
-~~text
-/home/wacista/data
-~~
-
-### Rebuild from scratch
-
-~~bash
-make re
-~~
-
-## Useful Checks
-
-Check that the website is reachable:
-
-~~bash
+```bash
 curl -k -I https://wacista.42.fr
-~~
+```
 
 Expected result:
 
-~~text
+```text
 HTTP/1.1 200 OK
-~~
+```
 
 Check that HTTP is not exposed:
 
-~~bash
+```bash
 curl -I http://wacista.42.fr --max-time 5
-~~
+```
 
 Expected result: connection refused or timeout.
 
-Check TLSv1.2:
+Check TLS:
 
-~~bash
+```bash
 openssl s_client -connect wacista.42.fr:443 -servername wacista.42.fr -tls1_2
-~~
-
-Check TLSv1.3:
-
-~~bash
 openssl s_client -connect wacista.42.fr:443 -servername wacista.42.fr -tls1_3
-~~
+```
 
-Check volumes:
+Check exposed ports:
 
-~~bash
-docker volume inspect mariadb_data wordpress_data
-~~
+```bash
+docker ps
+```
 
-Check the Docker network:
+Only NGINX should publish a host port:
 
-~~bash
-docker network ls
-~~
-
-Check running containers:
-
-~~bash
-docker compose -f srcs/docker-compose.yml --env-file srcs/.env ps
-~~
-
-## Services
-
-### NGINX
-
-NGINX is the only entrypoint into the infrastructure.
-
-It listens on port 443 and uses a self-signed TLS certificate generated locally inside the container.
-
-It forwards PHP requests to the WordPress container through FastCGI:
-
-~~text
-fastcgi_pass wordpress:9000
-~~
-
-### WordPress + php-fpm
-
-WordPress is installed and configured automatically with WP-CLI.
-
-It communicates with MariaDB through the Docker network using the hostname `mariadb`.
-
-It runs with php-fpm and does not contain NGINX.
-
-### MariaDB
-
-MariaDB stores the WordPress database.
-
-The database files are persisted through the `mariadb_data` named volume.
-
-The WordPress database and SQL users are created automatically during container initialization.
-
-## Security Notes
-
-No password is written directly inside the Dockerfiles.
-
-The `.env` file contains non-sensitive configuration only.
-
-Sensitive values are stored in local secret files:
-
-~~text
-secrets/db_root_password.txt
-secrets/db_password.txt
-secrets/wp_admin_password.txt
-secrets/wp_user_password.txt
-~~
-
-These files are ignored by Git.
+```text
+0.0.0.0:443->443/tcp
+```
 
 ## Resources
 
-Classic references used for this project:
+During the project, official documentation and community resources were consulted when needed, mainly for Docker, Docker Compose, NGINX, MariaDB, WordPress, WP-CLI and PHP-FPM.
 
-- Docker documentation
-- Docker Compose documentation
-- Dockerfile reference
-- Docker secrets documentation
-- NGINX documentation
-- MariaDB documentation
-- WordPress documentation
-- WP-CLI documentation
-- PHP-FPM documentation
+The Grademe Inception guide was also used as a complementary learning resource.
 
-## AI Usage
+## AI usage
 
-AI was used as a learning and debugging assistant during the project.
-
-It helped with:
-
-- understanding Docker and Docker Compose concepts;
-- structuring the project according to the subject requirements;
-- reviewing Dockerfiles and entrypoint scripts;
-- debugging MariaDB and WordPress initialization issues;
-- preparing validation commands;
-- drafting documentation.
-
-The final implementation choices, tests, and repository content were reviewed and validated manually.
-
+AI tools were used as a support resource to clarify concepts, troubleshoot issues, and review documentation.  
+The final implementation and validation tests were manually checked.

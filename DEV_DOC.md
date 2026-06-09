@@ -1,46 +1,42 @@
-# DEV_DOC.md
-
 # Inception Developer Documentation
 
 ## Purpose
 
-This document explains how a developer can set up, build, run, inspect, and maintain the Inception project.
+This document explains how to build, inspect, maintain, and troubleshoot the Inception project.
 
-The project is a small Docker Compose infrastructure composed of three mandatory services:
+The project runs a WordPress website using three Docker containers:
 
 - NGINX
-- WordPress + php-fpm
+- WordPress with PHP-FPM
 - MariaDB
 
-Each service has its own Dockerfile and runs inside its own container.
+Each service is built from its own Dockerfile and runs in its own container.
 
-## Global Architecture
+## Architecture Overview
 
-The infrastructure follows this flow:
+```text
+Browser
+   |
+   | HTTPS port 443
+   v
+NGINX
+   |
+   | FastCGI port 9000
+   v
+WordPress / PHP-FPM
+   |
+   | MariaDB port 3306
+   v
+MariaDB
+```
 
-~~text
-Client browser
-    |
-    | HTTPS 443
-    v
-NGINX container
-    |
-    | FastCGI: wordpress:9000
-    v
-WordPress + php-fpm container
-    |
-    | SQL: mariadb:3306
-    v
-MariaDB container
-~~
+Only NGINX is exposed to the host.
 
-NGINX is the only container exposed to the host machine.
-
-WordPress and MariaDB are only reachable from inside the Docker network.
+WordPress and MariaDB are only reachable inside the Docker network.
 
 ## Repository Structure
 
-~~text
+```text
 inception/
 ├── Makefile
 ├── README.md
@@ -54,6 +50,7 @@ inception/
 │   └── wp_user_password.txt
 └── srcs/
     ├── .env
+    ├── local.env
     ├── docker-compose.yml
     └── requirements/
         ├── mariadb/
@@ -74,729 +71,889 @@ inception/
             ├── Dockerfile
             └── tools/
                 └── init.sh
-~~
+```
 
-## Prerequisites
+## Configuration Files
 
-The project is designed to run inside a Debian virtual machine.
+### `srcs/.env`
 
-Required packages:
+This file contains non-sensitive project configuration.
 
-~~text
-docker
-docker compose
-make
-openssl
-~~
+Example:
 
-Install missing packages on Debian:
-
-~~bash
-sudo apt update
-sudo apt install -y make openssl
-~~
-
-Docker must already be installed and running.
-
-Check Docker:
-
-~~bash
-docker --version
-docker compose version
-~~
-
-## Environment Configuration
-
-The main environment file is:
-
-~~text
-srcs/.env
-~~
-
-It contains non-sensitive configuration:
-
-~~text
+```env
 DOMAIN_NAME=wacista.42.fr
 MYSQL_DATABASE=wordpress
 MYSQL_USER=wp_user
 WP_TITLE=Inception
-WP_ADMIN_USER=wacista_owner
-WP_ADMIN_EMAIL=wacista@student.42.fr
-WP_USER=wacista_user
-WP_USER_EMAIL=user@student.42.fr
-~~
+```
 
-Passwords must not be stored in `.env`.
+This file can be tracked by Git because it does not contain passwords.
 
-## Secrets
+### `srcs/local.env`
 
-Sensitive values are stored in local secret files:
+This file contains local WordPress account information.
 
-~~text
+Example:
+
+```env
+WP_ADMIN_USER=wpmaster
+WP_ADMIN_EMAIL=wpadmin@wacista.42.fr
+WP_USER=wpeditor
+WP_USER_EMAIL=wpeditor@wacista.42.fr
+```
+
+This file is ignored by Git because it is local to the machine.
+
+### `secrets/`
+
+Passwords are stored as local secret files.
+
+```text
 secrets/db_root_password.txt
 secrets/db_password.txt
 secrets/wp_admin_password.txt
 secrets/wp_user_password.txt
-~~
+```
 
-These files are used by Docker Compose as Docker secrets.
+The containers receive these values as Docker secrets and read them from:
 
-Inside containers, they are mounted under:
+```text
+/run/secrets/<secret_name>
+```
 
-~~text
-/run/secrets/
-~~
+The secret files are ignored by Git.
 
-Examples:
+## Project Lifecycle Commands
 
-~~text
-/run/secrets/db_root_password
-/run/secrets/db_password
-/run/secrets/wp_admin_password
-/run/secrets/wp_user_password
-~~
+### Start the project
 
-The Makefile creates these secret files automatically if they do not exist or if they are empty.
-
-The secret files must stay ignored by Git.
-
-Check that they are ignored:
-
-~~bash
-git check-ignore -v secrets/*.txt
-~~
-
-## Data Persistence
-
-The project stores persistent data in:
-
-~~text
-/home/wacista/data
-~~
-
-MariaDB data:
-
-~~text
-/home/wacista/data/mariadb
-~~
-
-WordPress files:
-
-~~text
-/home/wacista/data/wordpress
-~~
-
-The Docker named volumes are:
-
-~~text
-mariadb_data
-wordpress_data
-~~
-
-They are configured in `docker-compose.yml` with local driver options so their data is stored inside `/home/wacista/data`.
-
-Check volume configuration:
-
-~~bash
-docker volume inspect mariadb_data wordpress_data
-~~
-
-Expected paths:
-
-~~text
-/home/wacista/data/mariadb
-/home/wacista/data/wordpress
-~~
-
-## Docker Compose File
-
-The main Compose file is:
-
-~~text
-srcs/docker-compose.yml
-~~
-
-It defines:
-
-- the `mariadb` service;
-- the `wordpress` service;
-- the `nginx` service;
-- the `mariadb_data` and `wordpress_data` named volumes;
-- the `inception` Docker network;
-- the Docker secrets.
-
-The project name is set to:
-
-~~text
-inception
-~~
-
-The images are built locally with explicit tags:
-
-~~text
-mariadb:inception
-wordpress:inception
-nginx:inception
-~~
-
-## Services
-
-## MariaDB
-
-Path:
-
-~~text
-srcs/requirements/mariadb
-~~
-
-Files:
-
-~~text
-Dockerfile
-conf/50-server.cnf
-tools/init.sh
-~~
-
-The MariaDB Dockerfile starts from Debian and installs `mariadb-server`.
-
-The configuration file makes MariaDB listen on the Docker network:
-
-~~text
-bind-address = 0.0.0.0
-port = 3306
-~~
-
-The entrypoint script:
-
-1. checks required environment variables;
-2. reads database passwords from Docker secrets;
-3. prepares `/run/mysqld` and `/var/lib/mysql`;
-4. initializes the MariaDB system database if needed;
-5. creates the WordPress database;
-6. creates the SQL users;
-7. starts `mariadbd` in the foreground.
-
-The main process is:
-
-~~text
-mariadbd --user=mysql --console
-~~
-
-## WordPress + php-fpm
-
-Path:
-
-~~text
-srcs/requirements/wordpress
-~~
-
-Files:
-
-~~text
-Dockerfile
-conf/www.conf
-tools/init.sh
-~~
-
-The WordPress Dockerfile starts from Debian and installs:
-
-~~text
-php8.2-fpm
-php8.2-mysql
-mariadb-client
-curl
-ca-certificates
-~~
-
-It also installs WP-CLI.
-
-The php-fpm configuration listens on:
-
-~~text
-0.0.0.0:9000
-~~
-
-The entrypoint script:
-
-1. checks required environment variables;
-2. reads passwords from Docker secrets;
-3. copies WordPress files into `/var/www/html` if needed;
-4. waits for MariaDB to become available;
-5. creates `wp-config.php`;
-6. installs WordPress with WP-CLI;
-7. creates a regular WordPress user;
-8. updates `home` and `siteurl`;
-9. starts php-fpm in the foreground.
-
-The main process is:
-
-~~text
-php-fpm8.2 -F
-~~
-
-## NGINX
-
-Path:
-
-~~text
-srcs/requirements/nginx
-~~
-
-Files:
-
-~~text
-Dockerfile
-conf/nginx.conf
-tools/init.sh
-~~
-
-The NGINX Dockerfile starts from Debian and installs:
-
-~~text
-nginx
-openssl
-~~
-
-The entrypoint script generates a self-signed TLS certificate if it does not already exist.
-
-The NGINX configuration:
-
-- listens on port 443;
-- enables TLSv1.2 and TLSv1.3;
-- serves files from `/var/www/html`;
-- forwards PHP requests to `wordpress:9000`.
-
-The main process is:
-
-~~text
-nginx -g "daemon off;"
-~~
-
-## Makefile Usage
-
-The Makefile is located at the root of the repository.
-
-### Build and start
-
-~~bash
+```bash
 make
-~~
+```
 
-This executes the default target and starts the whole stack.
+This builds the images if needed, creates the required local files, and starts the stack.
 
-### Prepare folders and secrets
+### Stop the project
 
-~~bash
-make prepare
-~~
-
-This creates:
-
-~~text
-/home/wacista/data/mariadb
-/home/wacista/data/wordpress
-secrets/*.txt
-~~
-
-### Stop and remove containers
-
-~~bash
+```bash
 make down
-~~
+```
 
-This stops the Compose stack while keeping persistent data.
+This stops and removes the containers, while keeping persistent data.
 
-### Stop containers only
+### Restart the project
 
-~~bash
-make stop
-~~
-
-### Start stopped containers
-
-~~bash
-make start
-~~
-
-### Restart
-
-~~bash
+```bash
 make restart
-~~
+```
 
-### Show containers
-
-~~bash
-make ps
-~~
+This is a shortcut to stop and start the stack again.
 
 ### Show logs
 
-~~bash
+```bash
 make logs
-~~
+```
 
-### Validate Compose configuration
+### Validate the Compose configuration
 
-~~bash
+```bash
 make config
-~~
+```
 
-### Clean Docker objects
-
-~~bash
-make clean
-~~
+This prints the final Docker Compose configuration after variable interpolation.
 
 ### Full cleanup
 
-~~bash
+```bash
 make fclean
-~~
+```
 
-This removes:
+This removes containers, Docker volumes, unused Docker objects, and persistent project data.
 
-- containers;
-- Docker volumes;
-- unused Docker objects;
-- `/home/wacista/data`.
-
-Warning: this deletes persisted WordPress and MariaDB data.
+Use it only when a full reset is needed.
 
 ### Rebuild from scratch
 
-~~bash
+```bash
 make re
-~~
+```
 
-Equivalent to:
+This is equivalent to:
 
-~~bash
+```bash
 make fclean
 make
-~~
+```
 
-## Build and Launch From Scratch
+## Source Checks
 
-From the repository root:
+### Check Dockerfile base images
 
-~~bash
-make
-~~
+Purpose: check that each service is built from Debian.
 
-Then check the status:
+```bash
+grep -R "^FROM" srcs/requirements/*/Dockerfile
+```
 
-~~bash
-docker compose -f srcs/docker-compose.yml --env-file srcs/.env ps
-~~
+Expected idea:
 
-Expected services:
+```text
+FROM debian:bookworm
+```
 
-~~text
-mariadb
-wordpress
-nginx
-~~
+### Check that no image uses the `latest` tag
 
-All services should be `Up`.
+```bash
+grep -R "latest" .
+```
 
-## Validation Commands
+Expected result: no relevant result.
 
-### Check HTTPS
+### Check for forbidden shortcuts
 
-~~bash
-curl -k -I https://wacista.42.fr
-~~
+```bash
+grep -R "tail -f\|sleep infinity\|while true\|--link\|links:\|network_mode: host" .
+```
+
+Expected result: no relevant result.
+
+### Check foreground processes
+
+Purpose: make sure containers are kept alive by their real main service, not by a fake infinite command.
+
+Useful expected processes:
+
+```text
+mariadbd --user=mysql --console
+php-fpm8.2 -F
+nginx -g "daemon off;"
+```
+
+## Git Hygiene Checks
+
+### Check that secrets are not tracked
+
+```bash
+git ls-files | grep -E "(^|/)secrets/.*\.txt|srcs/local\.env"
+```
+
+Expected result: no output.
+
+### Check that ignored files are ignored
+
+```bash
+git check-ignore -v secrets/*.txt srcs/local.env
+```
+
+Expected result: `.gitignore` should be shown as the ignore source.
+
+### Check that `.env` is tracked
+
+```bash
+git ls-files srcs/.env
+```
 
 Expected result:
 
-~~text
-HTTP/1.1 200 OK
-~~
+```text
+srcs/.env
+```
 
-### Check HTTP is not exposed
+## Runtime Checks
 
-~~bash
-curl -I http://wacista.42.fr --max-time 5
-~~
+### Check containers
 
-Expected result: connection refused or timeout.
-
-### Check TLSv1.2
-
-~~bash
-openssl s_client -connect wacista.42.fr:443 -servername wacista.42.fr -tls1_2
-~~
-
-### Check TLSv1.3
-
-~~bash
-openssl s_client -connect wacista.42.fr:443 -servername wacista.42.fr -tls1_3
-~~
-
-### Check images
-
-~~bash
-docker images
-~~
-
-Expected images:
-
-~~text
-mariadb     inception
-wordpress   inception
-nginx       inception
-~~
-
-### Check exposed ports
-
-~~bash
+```bash
 docker ps
-~~
+```
 
-Expected result:
+Expected idea:
 
-~~text
+```text
 nginx       0.0.0.0:443->443/tcp
 wordpress   9000/tcp
 mariadb     3306/tcp
-~~
+```
 
-Only NGINX should expose a host port.
+Only NGINX should publish a port to the host.
 
-### Check network
+WordPress and MariaDB should remain internal.
 
-~~bash
+### Check Compose services
+
+```bash
+docker compose -f srcs/docker-compose.yml --env-file srcs/.env ps
+```
+
+Expected services:
+
+```text
+mariadb
+wordpress
+nginx
+```
+
+All services should be running.
+
+### Check images
+
+```bash
+docker images
+```
+
+Expected project images:
+
+```text
+mariadb     inception
+wordpress   inception
+nginx       inception
+```
+
+### Check container processes
+
+```bash
+docker top mariadb
+docker top wordpress
+docker top nginx
+```
+
+Expected main services:
+
+```text
+mariadbd
+php-fpm
+nginx
+```
+
+## Docker Network Checks
+
+### Check that the custom network exists
+
+```bash
 docker network ls
-~~
+```
 
 Expected custom network:
 
-~~text
+```text
 inception
-~~
+```
 
-### Check volumes
+### Inspect the network
 
-~~bash
-docker volume inspect mariadb_data wordpress_data
-~~
+```bash
+docker network inspect inception
+```
 
-Expected volume devices:
+Expected containers connected to the network:
 
-~~text
-/home/wacista/data/mariadb
-/home/wacista/data/wordpress
-~~
+```text
+mariadb
+wordpress
+nginx
+```
 
-### Check WordPress database tables
+### Check service-name resolution
 
-~~bash
-docker exec mariadb sh -c 'mariadb -u"$MYSQL_USER" -p"$(cat /run/secrets/db_password)" -hlocalhost "$MYSQL_DATABASE" -e "SHOW TABLES;"'
-~~
+Purpose: confirm that containers can resolve each other by service name.
+
+```bash
+docker exec nginx getent hosts wordpress
+docker exec wordpress getent hosts mariadb
+```
+
+Expected result: each command returns an internal Docker network IP.
+
+## HTTPS and TLS Checks
+
+### Check HTTPS
+
+```bash
+curl -k -I https://wacista.42.fr
+```
+
+Expected result:
+
+```text
+HTTP/1.1 200 OK
+```
+
+The `-k` flag is used because the TLS certificate is self-signed.
+
+### Check that HTTP is not exposed
+
+```bash
+curl -I http://wacista.42.fr --max-time 5
+```
+
+Expected result: connection refused or timeout.
+
+### Check TLS 1.2
+
+```bash
+openssl s_client -connect wacista.42.fr:443 -servername wacista.42.fr -tls1_2
+```
+
+Expected result: the TLS handshake succeeds.
+
+### Check TLS 1.3
+
+```bash
+openssl s_client -connect wacista.42.fr:443 -servername wacista.42.fr -tls1_3
+```
+
+Expected result: the TLS handshake succeeds.
+
+### Inspect NGINX TLS configuration
+
+```bash
+docker exec nginx nginx -T | grep -E "listen|ssl_certificate|ssl_protocols"
+```
+
+Expected idea:
+
+```text
+listen 443 ssl;
+ssl_certificate ...
+ssl_certificate_key ...
+ssl_protocols TLSv1.2 TLSv1.3;
+```
+
+### Inspect NGINX FastCGI configuration
+
+```bash
+docker exec nginx nginx -T | grep fastcgi_pass
+```
+
+Expected result:
+
+```text
+fastcgi_pass wordpress:9000;
+```
+
+NGINX forwards PHP requests to the WordPress PHP-FPM container.
+
+## WordPress and PHP-FPM Checks
+
+### Check WordPress container logs
+
+```bash
+docker compose -f srcs/docker-compose.yml --env-file srcs/.env logs wordpress
+```
+
+Expected idea: the logs should show that WordPress was installed or already exists, and that PHP-FPM started.
+
+### Check WordPress files
+
+```bash
+docker exec wordpress ls -la /var/www/html
+```
+
+Expected files include:
+
+```text
+wp-config.php
+wp-content
+wp-admin
+wp-includes
+```
+
+### Check WordPress installation with WP-CLI
+
+```bash
+docker exec wordpress wp core is-installed --path=/var/www/html --allow-root
+```
+
+Expected result: the command exits successfully.
+
+### List WordPress users
+
+```bash
+docker exec wordpress wp user list --path=/var/www/html --allow-root
+```
+
+Expected idea: the administrator user and the regular user are listed.
+
+### Check PHP-FPM configuration
+
+```bash
+docker exec wordpress grep -R "listen" /etc/php/*/fpm/pool.d/www.conf
+```
+
+Expected result:
+
+```text
+listen = 9000
+```
+
+## MariaDB Checks
+
+### Check MariaDB container logs
+
+```bash
+docker compose -f srcs/docker-compose.yml --env-file srcs/.env logs mariadb
+```
+
+Expected idea: the logs should show that MariaDB is ready for connections.
+
+### Connect to MariaDB interactively
+
+```bash
+docker exec -it mariadb sh
+```
+
+Then inside the container:
+
+```bash
+mariadb -u"$MYSQL_USER" -p"$(cat /run/secrets/db_password)" "$MYSQL_DATABASE"
+```
+
+Useful SQL commands:
+
+```sql
+SHOW DATABASES;
+SHOW TABLES;
+SELECT ID, post_title, post_type FROM wp_posts LIMIT 5;
+```
+
+Exit MariaDB:
+
+```sql
+exit;
+```
+
+Exit the container shell:
+
+```bash
+exit
+```
+
+### Check WordPress database tables directly
+
+```bash
+docker exec mariadb sh -c 'mariadb -u"$MYSQL_USER" -p"$(cat /run/secrets/db_password)" "$MYSQL_DATABASE" -e "SHOW TABLES;"'
+```
 
 Expected tables include:
 
-~~text
+```text
 wp_options
 wp_posts
 wp_users
 wp_comments
-~~
+```
 
-### Check WordPress installation
+### Check MariaDB users
 
-~~bash
-docker exec wordpress wp core is-installed --path=/var/www/html --allow-root
-~~
+```bash
+docker exec mariadb sh -c 'mariadb -uroot -p"$(cat /run/secrets/db_root_password)" -e "SELECT User, Host FROM mysql.user;"'
+```
 
-This command should exit successfully.
+Expected idea:
 
-## Simulating the Evaluation Cleanup
+```text
+root      localhost
+wp_user   %
+wp_user   localhost
+```
 
-The evaluation may start by removing Docker objects.
+### Check databases
 
-A local simulation can be done with:
+```bash
+docker exec mariadb sh -c 'mariadb -uroot -p"$(cat /run/secrets/db_root_password)" -e "SHOW DATABASES;"'
+```
 
-~~bash
-docker stop $(docker ps -qa) 2>/dev/null || true
-docker rm $(docker ps -qa) 2>/dev/null || true
-docker rmi -f $(docker images -qa) 2>/dev/null || true
-docker volume rm $(docker volume ls -q) 2>/dev/null || true
-docker network rm $(docker network ls -q) 2>/dev/null || true
-~~
+Expected database:
 
-Then rebuild:
+```text
+wordpress
+```
 
-~~bash
-cd ~/inception
+## Docker Secret Checks
+
+### Check mounted secrets in MariaDB
+
+```bash
+docker exec mariadb ls -la /run/secrets
+```
+
+Expected secrets:
+
+```text
+db_root_password
+db_password
+```
+
+### Check mounted secrets in WordPress
+
+```bash
+docker exec wordpress ls -la /run/secrets
+```
+
+Expected secrets:
+
+```text
+db_password
+wp_admin_password
+wp_user_password
+```
+
+### Check that local secret files are not empty
+
+```bash
+for f in secrets/*.txt; do test -s "$f" && echo "$f: OK" || echo "$f: EMPTY"; done
+```
+
+Expected result: all secret files are `OK`.
+
+## Volume and Persistence Checks
+
+### Check Docker volumes
+
+```bash
+docker volume ls
+```
+
+Expected project volumes:
+
+```text
+mariadb_data
+wordpress_data
+```
+
+### Inspect volume locations
+
+```bash
+docker volume inspect mariadb_data wordpress_data
+```
+
+Expected host paths:
+
+```text
+/home/wacista/data/mariadb
+/home/wacista/data/wordpress
+```
+
+### Check host data folders
+
+```bash
+ls -la /home/wacista/data
+ls -la /home/wacista/data/mariadb
+ls -la /home/wacista/data/wordpress
+```
+
+Expected result: both data directories exist and contain files after the stack has started.
+
+### Check persistence after restart
+
+Create or modify a WordPress page from the browser, then run:
+
+```bash
+make down
 make
-~~
+```
 
-Validate again:
+After the stack is running again, the modification should still exist.
 
-~~bash
+### Check persistence after removing containers
+
+```bash
+docker rm -f mariadb wordpress nginx
+make
+```
+
+Expected result: the website and database data should still be present, because the Docker volumes were not removed.
+
+## Browser Access Checks
+
+### Open from the VM graphical session
+
+```bash
+startx
+```
+
+This opens a minimal graphical session with Firefox and `xterm`.
+
+### Open through SSH X11 forwarding
+
+```bash
+ssh -X wacista@<vm_ip>
+firefox-esr https://wacista.42.fr
+```
+
+Trusted X11 forwarding can also be used when needed:
+
+```bash
+ssh -Y wacista@<vm_ip>
+firefox-esr https://wacista.42.fr
+```
+
+### Check domain resolution inside the VM
+
+```bash
+getent hosts wacista.42.fr
+```
+
+Expected result inside the VM:
+
+```text
+127.0.0.1 wacista.42.fr
+```
+
+## Configuration Changes
+
+### Change the external HTTPS port
+
+A common maintenance task is to change how the service is exposed on the host.
+
+In `srcs/docker-compose.yml`, change:
+
+```yaml
+ports:
+  - "443:443"
+```
+
+to:
+
+```yaml
+ports:
+  - "8443:443"
+```
+
+Explanation:
+
+```text
+8443 = host port
+443  = container port
+```
+
+Restart the stack:
+
+```bash
+make restart
+```
+
+Test the new host port:
+
+```bash
+curl -k -I https://wacista.42.fr:8443
+```
+
+Expected result:
+
+```text
+HTTP/1.1 200 OK
+```
+
+To restore the original configuration:
+
+```yaml
+ports:
+  - "443:443"
+```
+
+Then restart again:
+
+```bash
+make restart
+```
+
+### Change a non-sensitive environment value
+
+Example: change the WordPress website title.
+
+Edit `srcs/.env`:
+
+```env
+WP_TITLE=New Title
+```
+
+Then perform a full reset if the value is only used during first installation:
+
+```bash
+make fclean
+make
+```
+
+Some WordPress values are written into the database during installation, so changing the `.env` file alone may not update an already installed site.
+
+## Full Rebuild Test
+
+### Project-level rebuild
+
+```bash
+make fclean
+make
+```
+
+Then check:
+
+```bash
 curl -k -I https://wacista.42.fr
 docker ps
 docker images
 docker volume inspect mariadb_data wordpress_data
 docker network ls
-~~
+```
 
-## Common Development Issues
+Expected result:
+
+- HTTPS returns `HTTP/1.1 200 OK`
+- only NGINX exposes port `443`
+- project images are tagged `inception`
+- project volumes exist
+- project network exists
+
+### Optional Docker-wide cleanup
+
+This is destructive and removes Docker objects from the local environment.
+
+```bash
+docker stop $(docker ps -qa) 2>/dev/null || true
+docker rm $(docker ps -qa) 2>/dev/null || true
+docker rmi -f $(docker images -qa) 2>/dev/null || true
+docker volume rm $(docker volume ls -q) 2>/dev/null || true
+docker network rm $(docker network ls -q | grep -vE '^(bridge|host|none)$') 2>/dev/null || true
+```
+
+Then rebuild the project:
+
+```bash
+cd ~/inception
+make
+```
+
+## Troubleshooting
 
 ### Container name already exists
 
-If Docker reports that a container name is already in use:
-
-~~bash
+```bash
 docker rm -f mariadb wordpress nginx
 make
-~~
+```
 
-This removes containers only, not persistent data.
+This removes containers only. It does not remove persistent volume data.
 
 ### Old Compose project labels
 
-If a warning says that a volume or network was created for another project, remove the Docker objects and recreate them:
+If Docker reports that a volume or network was created by another Compose project:
 
-~~bash
+```bash
 make down
 docker rm -f mariadb wordpress nginx 2>/dev/null || true
 docker volume rm mariadb_data wordpress_data 2>/dev/null || true
 docker network rm inception 2>/dev/null || true
 make
-~~
+```
+
+This recreates project-specific Docker objects.
 
 ### WordPress cannot connect to MariaDB
 
-Inspect MariaDB users:
+Check MariaDB logs:
 
-~~bash
+```bash
+docker compose -f srcs/docker-compose.yml --env-file srcs/.env logs mariadb
+```
+
+Check WordPress logs:
+
+```bash
+docker compose -f srcs/docker-compose.yml --env-file srcs/.env logs wordpress
+```
+
+Check database user entries:
+
+```bash
 docker exec mariadb sh -c 'mariadb -uroot -p"$(cat /run/secrets/db_root_password)" -e "SELECT User, Host FROM mysql.user;"'
-~~
+```
 
-Expected entries:
+Check that the database exists:
 
-~~text
-wp_user    %
-wp_user    localhost
-~~
-
-Inspect databases:
-
-~~bash
+```bash
 docker exec mariadb sh -c 'mariadb -uroot -p"$(cat /run/secrets/db_root_password)" -e "SHOW DATABASES;"'
-~~
+```
 
-Expected database:
+### HTTPS does not answer
 
-~~text
-wordpress
-~~
+Check that NGINX is running:
+
+```bash
+docker ps
+```
+
+Check NGINX logs:
+
+```bash
+docker compose -f srcs/docker-compose.yml --env-file srcs/.env logs nginx
+```
+
+Check NGINX configuration:
+
+```bash
+docker exec nginx nginx -T
+```
+
+Check the domain resolution:
+
+```bash
+getent hosts wacista.42.fr
+```
 
 ### Reset persistent data
 
-To fully reset MariaDB and WordPress data:
-
-~~bash
+```bash
 make fclean
 make
-~~
+```
 
-## Configuration Change During Defense
+This deletes the database and WordPress files, then recreates the stack from scratch.
 
-A reviewer may ask for a small configuration change.
+## Quick Maintenance Summary
 
-Example: expose NGINX on host port `8443` instead of `443`.
-
-In `srcs/docker-compose.yml`, change:
-
-~~yaml
-ports:
-  - "443:443"
-~~
-
-to:
-
-~~yaml
-ports:
-  - "8443:443"
-~~
-
-Explanation:
-
-~~text
-8443 = host port
-443  = container port
-~~
-
-Then rebuild/restart:
-
-~~bash
-make down
+```bash
+# Build and start
 make
-~~
 
-Test:
-
-~~bash
-curl -k -I https://wacista.42.fr:8443
-~~
-
-After the test, restore:
-
-~~yaml
-ports:
-  - "443:443"
-~~
-
-Then restart:
-
-~~bash
+# Stop containers
 make down
+
+# Restart
+make restart
+
+# Logs
+make logs
+
+# Compose config
+make config
+
+# HTTPS check
+curl -k -I https://wacista.42.fr
+
+# HTTP should not be exposed
+curl -I http://wacista.42.fr --max-time 5
+
+# Containers and exposed ports
+docker ps
+
+# Images
+docker images
+
+# Network
+docker network inspect inception
+
+# Volumes
+docker volume inspect mariadb_data wordpress_data
+
+# MariaDB tables
+docker exec mariadb sh -c 'mariadb -u"$MYSQL_USER" -p"$(cat /run/secrets/db_password)" "$MYSQL_DATABASE" -e "SHOW TABLES;"'
+
+# WordPress installed
+docker exec wordpress wp core is-installed --path=/var/www/html --allow-root
+
+# Full reset
+make fclean
 make
-~~
-
-## Git Hygiene
-
-Secrets must not be tracked by Git.
-
-Check tracked secret files:
-
-~~bash
-git ls-files | grep secrets
-~~
-
-Expected result: no `.txt` secret files should appear.
-
-Check ignored secrets:
-
-~~bash
-git check-ignore -v secrets/*.txt
-~~
-
-The `.env` file may be tracked if it only contains non-sensitive configuration.
-
-## Important Rules
-
-The project must not use:
-
-~~text
-network_mode: host
-links:
---link
-latest
-tail -f
-sleep infinity
-while true
-~~
-
-The main process of each container must run in the foreground:
-
-~~text
-mariadbd --user=mysql --console
-php-fpm8.2 -F
-nginx -g "daemon off;"
-~~
-
+```
