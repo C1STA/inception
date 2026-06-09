@@ -16,9 +16,9 @@ The mandatory stack contains three services:
 
 The website is available at:
 
-~~text
+~~~text
 https://wacista.42.fr
-~~
+~~~
 
 HTTP access on port 80 is intentionally not exposed.
 
@@ -30,9 +30,9 @@ Each image is built locally from Debian and is not pulled from ready-made servic
 
 The services communicate through a dedicated Docker network:
 
-~~text
+```text
 NGINX -> WordPress/php-fpm -> MariaDB
-~~
+```
 
 Persistent data is stored using Docker named volumes:
 
