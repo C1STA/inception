@@ -65,7 +65,7 @@ startx
 ```
 
 This launches a minimal graphical session with Firefox and `xterm`.
-The idea is to being able to navigate on Firefox while being able to use the terminal.
+The goal is to be able to use Firefox and the terminal at the same time.
 
 The website can also be opened through SSH with X11 forwarding if the host supports it:
 
