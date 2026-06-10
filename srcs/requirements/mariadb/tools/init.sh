@@ -30,7 +30,11 @@ fi
 
 echo "Preparing Inception database initialization..."
 
-cat > /tmp/init.sql <<EOF
+INIT_SQL="/run/mysqld/init.sql"
+
+rm -f "$INIT_SQL"
+
+cat > "$INIT_SQL" <<EOF
 DELETE FROM mysql.user WHERE User='';
 DROP DATABASE IF EXISTS test;
 DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
@@ -51,7 +55,7 @@ GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'localhost';
 FLUSH PRIVILEGES;
 EOF
 
-chmod 600 /tmp/init.sql
-chown mysql:mysql /tmp/init.sql
+chmod 600 "$INIT_SQL"
+chown mysql:mysql "$INIT_SQL"
 
-exec "$@" --init-file=/tmp/init.sql
+exec "$@" --init-file="$INIT_SQL"
