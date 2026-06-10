@@ -31,6 +31,8 @@ fi
 DB_PASSWORD="$(cat /run/secrets/db_password)"
 WP_ADMIN_PASSWORD="$(cat /run/secrets/wp_admin_password)"
 WP_USER_PASSWORD="$(cat /run/secrets/wp_user_password)"
+MYSQL_PORT="${MYSQL_PORT:-3306}"
+DB_HOST="mariadb:${MYSQL_PORT}"
 
 mkdir -p /var/www/html /run/php
 
@@ -41,7 +43,7 @@ fi
 
 echo "Waiting for MariaDB..."
 i=0
-until mariadb -hmariadb -u"$MYSQL_USER" -p"$DB_PASSWORD" "$MYSQL_DATABASE" -e "SELECT 1;" >/dev/null 2>&1; do
+until mariadb -hmariadb -P"$MYSQL_PORT" -u"$MYSQL_USER" -p"$DB_PASSWORD" "$MYSQL_DATABASE" -e "SELECT 1;" >/dev/null 2>&1; do
 	i=$((i + 1))
 	if [ "$i" -ge 60 ]; then
 		echo "Error: MariaDB is unavailable"
@@ -57,9 +59,11 @@ if [ ! -f /var/www/html/wp-config.php ]; then
 		--dbname="$MYSQL_DATABASE" \
 		--dbuser="$MYSQL_USER" \
 		--dbpass="$DB_PASSWORD" \
-		--dbhost="mariadb:3306" \
+		--dbhost="$DB_HOST" \
 		--allow-root
 fi
+
+wp config set DB_HOST "$DB_HOST" --path=/var/www/html --allow-root
 
 if ! wp core is-installed --path=/var/www/html --allow-root >/dev/null 2>&1; then
 	echo "Installing WordPress..."
