@@ -1,0 +1,40 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    env:
+      DATA_DIR: /tmp/inception-data
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Prepare local configuration
+        run: |
+          cp srcs/.env.example srcs/.env
+          cp srcs/local.env.example srcs/local.env
+          mkdir -p secrets
+          printf 'ci-only-secret\n' > secrets/db_root_password.txt
+          printf 'ci-only-secret\n' > secrets/db_password.txt
+          printf 'ci-only-secret\n' > secrets/wp_admin_password.txt
+          printf 'ci-only-secret\n' > secrets/wp_user_password.txt
+
+      - name: Validate shell scripts
+        run: |
+          sh -n srcs/requirements/mariadb/tools/init.sh
+          sh -n srcs/requirements/nginx/tools/init.sh
+          sh -n srcs/requirements/wordpress/tools/init.sh
+
+      - name: Validate Compose model
+        run: docker compose -f srcs/docker-compose.yml --env-file srcs/.env config --quiet
+
+      - name: Build custom images
+        run: docker compose -f srcs/docker-compose.yml --env-file srcs/.env build

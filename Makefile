@@ -1,11 +1,11 @@
 NAME		= inception
-LOGIN		= wacista
 
 SRC_DIR		= srcs
 COMPOSE		= $(SRC_DIR)/docker-compose.yml
 ENV_FILE	= $(SRC_DIR)/.env
+LOCAL_ENV	= $(SRC_DIR)/local.env
 
-DATA_DIR	= /home/$(LOGIN)/data
+DATA_DIR	?= $(HOME)/data
 DB_DIR		= $(DATA_DIR)/mariadb
 WP_DIR		= $(DATA_DIR)/wordpress
 
@@ -15,14 +15,18 @@ DB_PWD		= $(SECRETS_DIR)/db_password.txt
 WP_ADMIN_PWD	= $(SECRETS_DIR)/wp_admin_password.txt
 WP_USER_PWD	= $(SECRETS_DIR)/wp_user_password.txt
 
-DC		= docker compose -f $(COMPOSE) --env-file $(ENV_FILE)
+DC		= DATA_DIR=$(DATA_DIR) docker compose -f $(COMPOSE) --env-file $(ENV_FILE)
 
 all: up
 
 up: prepare
 	$(DC) up -d --build
 
-prepare: dirs secrets
+prepare: check-env dirs secrets
+
+check-env:
+	@test -f $(ENV_FILE) || (echo "Missing $(ENV_FILE); copy $(SRC_DIR)/.env.example first" && exit 1)
+	@test -f $(LOCAL_ENV) || (echo "Missing $(LOCAL_ENV); copy $(SRC_DIR)/local.env.example first" && exit 1)
 
 dirs:
 	mkdir -p $(DB_DIR)
@@ -56,15 +60,15 @@ config: prepare
 	$(DC) config
 
 clean:
-	$(DC) down
-	docker system prune -af
+	$(DC) down --remove-orphans
 
 fclean:
 	$(DC) down -v
 	docker volume rm mariadb_data wordpress_data 2>/dev/null || true
-	sudo rm -rf $(DATA_DIR)
-	docker system prune -af
+	@test -n "$(DATA_DIR)" && test "$(DATA_DIR)" != "/" && test "$(DATA_DIR)" != "$(HOME)"
+	sudo rm -rf -- $(DB_DIR) $(WP_DIR)
+	rmdir $(DATA_DIR) 2>/dev/null || true
 
 re: fclean all
 
-.PHONY: all up prepare dirs secrets down stop start restart ps logs config clean fclean re
+.PHONY: all up prepare check-env dirs secrets down stop start restart ps logs config clean fclean re

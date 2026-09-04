@@ -1,3 +1,5 @@
-secrets/*
-*local.env
+secrets/
+srcs/.env
+srcs/local.env
 *.log
+.DS_Store

@@ -1,150 +1,144 @@
-*This project has been created as part of the 42 curriculum by wacista.*
-
 # Inception
 
-## Description
+[![Build](https://github.com/C1STA/inception/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/C1STA/inception/actions/workflows/build.yml)
 
-Inception is a 42 system administration project. It builds a small Docker infrastructure inside a Debian virtual machine.
+A containerized WordPress infrastructure built from custom Debian-based images.
+The project separates the HTTPS entrypoint, application runtime, and database
+into three isolated services orchestrated with Docker Compose.
 
-The mandatory stack contains:
+Inception is a system-administration project from the 42 curriculum. It focuses
+on reproducible infrastructure, service boundaries, secret management, TLS, and
+persistent data rather than application development.
 
-- **NGINX**: HTTPS entrypoint on port `443`.
-- **WordPress + php-fpm**: application service.
-- **MariaDB**: database service.
+## Architecture
 
-The website is available at:
-
-```text
-https://wacista.42.fr
+```mermaid
+flowchart LR
+    Browser[Browser] -->|HTTPS 443| NGINX[NGINX + TLS]
+    NGINX -->|FastCGI 9000| WordPress[WordPress + PHP-FPM]
+    WordPress -->|SQL 3306| MariaDB[(MariaDB)]
+    WordPress --> WPData[(WordPress volume)]
+    MariaDB --> DBData[(MariaDB volume)]
 ```
 
-HTTP on port `80` is not exposed.
+Only NGINX publishes a host port. WordPress and MariaDB communicate exclusively
+through the internal `inception` bridge network.
 
-## Project description
+## Engineering highlights
 
-Architecture:
+- Three custom images built from `debian:bookworm`, without using application
+  images from Docker Hub
+- TLS 1.2 and TLS 1.3 termination at NGINX with a generated local certificate
+- WordPress served by PHP-FPM, with no web server in the application container
+- MariaDB isolated from the host network
+- Passwords generated locally and mounted through Docker secrets
+- Idempotent entrypoint scripts that initialize services only when required
+- Persistent WordPress and MariaDB data backed by host directories
+- `restart: always` policies for recovery after Docker or VM restarts
+- No idle shell loops or fake long-running commands: each container executes its
+  service as PID 1
 
-```text
-Browser -> HTTPS 443 -> NGINX -> wordpress:9000 -> WordPress/php-fpm -> mariadb:3306 -> MariaDB
+## Service lifecycle
+
+```mermaid
+flowchart TD
+    Config[Local configuration] --> Secrets[Generate missing secrets]
+    Secrets --> Directories[Prepare persistent directories]
+    Directories --> Build[Build three custom images]
+    Build --> Database[Initialize MariaDB]
+    Database --> Application[Configure WordPress]
+    Application --> Proxy[Start NGINX with TLS]
 ```
 
-Each service has its own Dockerfile and local image:
+MariaDB creates its system tables, application database, and restricted user on
+the first start. WordPress waits for the database, creates `wp-config.php`, and
+installs the site and users only when needed. Existing volumes are reused on
+subsequent starts.
 
-```text
-nginx:inception
-wordpress:inception
-mariadb:inception
+## Run locally
+
+### Requirements
+
+- Linux or a Linux virtual machine
+- Docker Engine with Docker Compose v2
+- GNU Make and OpenSSL
+- Permission to create directories under `$HOME/data`
+
+Create the local configuration files:
+
+```bash
+git clone https://github.com/C1STA/inception.git
+cd inception
+cp srcs/.env.example srcs/.env
+cp srcs/local.env.example srcs/local.env
 ```
 
-Persistent data is stored in Docker named volumes:
-
-```text
-mariadb_data   -> /home/wacista/data/mariadb
-wordpress_data -> /home/wacista/data/wordpress
-```
-
-The services communicate through the Docker network `inception`. Only NGINX publishes a port to the host.
-
-## Docker concepts
-
-### Virtual Machines vs Docker
-
-A virtual machine runs a complete guest operating system with its own kernel. It provides strong isolation, but it is heavier in terms of disk usage, memory usage, and startup time.
-
-Docker containers share the host kernel and isolate processes using Linux features. They are lighter, faster to start, and easier to reproduce, which makes them suitable for packaging services such as NGINX, WordPress, and MariaDB.
-
-In this project, the whole infrastructure runs inside a virtual machine, while each service runs inside its own Docker container.
-
-### Secrets vs Environment Variables
-
-Environment variables define how the services are configured; Docker secrets store sensitive values such as passwords outside of the Git repository.
-
-### Docker Network vs Host Network
-
-A Docker network gives containers their own isolated network and lets them communicate by service name.
-
-Host networking would make a container use the host network directly, reducing isolation and making port exposure less explicit.
-
-This project uses a Docker network, so only NGINX publishes port `443` to the host.
-
-### Docker Volumes vs Bind Mounts
-
-Containers are temporary, so persistent data must be stored outside the container writable layer.
-
-Docker volumes are managed by Docker and are designed to persist data beyond a container’s lifetime.
-
-Bind mounts directly map a specific host directory into a container.
-
-In this project, named volumes are used for MariaDB and WordPress data, and they are configured to store their files under `/home/wacista/data`.
-
-## Instructions
-
-From the project root:
+Adjust the values if needed, then start the stack:
 
 ```bash
 make
 ```
 
-This creates the data directories, generates missing password secrets, builds the images and starts the containers.
+The default configuration uses `inception.local`. Add it to `/etc/hosts`:
+
+```text
+127.0.0.1 inception.local
+```
+
+Open <https://inception.local> and accept the self-signed development
+certificate. The WordPress administration page is available at
+<https://inception.local/wp-admin>.
 
 Useful commands:
 
+| Command        | Action                                      |
+| -------------- | ------------------------------------------- |
+| `make up`      | Build and start the complete stack          |
+| `make down`    | Stop and remove the containers              |
+| `make stop`    | Stop the containers without removing them   |
+| `make start`   | Restart existing containers                 |
+| `make ps`      | Display service status                      |
+| `make logs`    | Follow logs from all services               |
+| `make config`  | Render and validate the Compose model       |
+| `make fclean`  | Remove this stack, its volumes, and its data |
+
+Generated passwords are stored under `secrets/` and never committed. The
+account names and emails live in the ignored `srcs/local.env` file.
+
+## Validation
+
+Check the HTTPS endpoint:
+
 ```bash
-make down      # stop containers
-make ps        # show services
-make logs      # show logs
-make fclean    # full cleanup, including /home/wacista/data
-make re        # full rebuild
+curl -k -I https://inception.local
 ```
 
-## Useful checks
-
-Check HTTPS:
+Only NGINX should expose a host port:
 
 ```bash
-curl -k -I https://wacista.42.fr
+make ps
 ```
 
-Expected result:
+The repository's GitHub Actions workflow validates all shell scripts, renders
+the Compose model, and builds the three custom images.
+
+## Project structure
 
 ```text
-HTTP/1.1 200 OK
+.
+|-- Makefile
+|-- README.md
+|-- USER_DOC.md                 Operations and usage guide
+|-- DEV_DOC.md                  Architecture and maintenance guide
+|-- secrets/                    Generated passwords, ignored by Git
+`-- srcs/
+    |-- .env.example            Shared non-sensitive configuration
+    |-- local.env.example       Local WordPress account template
+    |-- docker-compose.yml
+    `-- requirements/
+        |-- nginx/              TLS entrypoint and FastCGI proxy
+        |-- wordpress/          PHP-FPM, WP-CLI, and initialization
+        `-- mariadb/            Database configuration and initialization
 ```
 
-Check that HTTP is not exposed:
-
-```bash
-curl -I http://wacista.42.fr --max-time 5
-```
-
-Expected result: connection refused or timeout.
-
-Check TLS:
-
-```bash
-openssl s_client -connect wacista.42.fr:443 -servername wacista.42.fr -tls1_2
-openssl s_client -connect wacista.42.fr:443 -servername wacista.42.fr -tls1_3
-```
-
-Check exposed ports:
-
-```bash
-docker ps
-```
-
-Only NGINX should publish a host port:
-
-```text
-0.0.0.0:443->443/tcp
-```
-
-## Resources
-
-During the project, official documentation and community resources were consulted when needed, mainly for Docker, Docker Compose, NGINX, MariaDB, WordPress, WP-CLI and PHP-FPM.
-
-The Grademe Inception guide was also used as a complementary learning resource.
-
-## AI usage
-
-AI tools were used as a support resource to clarify concepts, troubleshoot issues, and review documentation.  
-The final implementation and validation tests were manually checked.
+The exact version submitted to 42 is available through the `42-submission` tag.
